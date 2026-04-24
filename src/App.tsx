@@ -11,6 +11,7 @@ type HistoryItem = {
 };
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+type Theme = "light" | "dark";
 
 function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -38,6 +39,19 @@ async function apiGet<T>(path: string): Promise<T> {
   return data as T;
 }
 
+async function apiDelete<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || res.statusText);
+  }
+  return data as T;
+}
+
 function BrainstormPanel({
   messages,
   draft,
@@ -45,6 +59,7 @@ function BrainstormPanel({
   onSend,
   loading,
   error,
+  isDark,
 }: {
   messages: ChatMessage[];
   draft: string;
@@ -52,6 +67,7 @@ function BrainstormPanel({
   onSend: () => void;
   loading: boolean;
   error: string | null;
+  isDark: boolean;
 }) {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -59,16 +75,26 @@ function BrainstormPanel({
   }, [messages, loading]);
 
   return (
-    <section className="flex h-full min-h-[420px] flex-col rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 shadow-xl backdrop-blur-sm">
+    <section
+      className={`flex h-full min-h-[420px] flex-col rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
+        isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
+      }`}
+    >
       <header className="mb-4">
-        <h2 className="font-display text-2xl text-zinc-50">Brainstorm</h2>
-        <p className="mt-1 text-sm text-zinc-400">
+        <h2 className={`font-display text-2xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+          Brainstorm
+        </h2>
+        <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
           Chat through angles, titles, segments, and hooks before you write.
         </p>
       </header>
-      <div className="flex-1 space-y-3 overflow-y-auto rounded-xl bg-zinc-950/50 p-4 ring-1 ring-zinc-800/60">
+      <div
+        className={`flex-1 space-y-3 overflow-y-auto rounded-xl p-4 ring-1 ${
+          isDark ? "bg-zinc-950/50 ring-zinc-800/60" : "bg-white/90 ring-zinc-200"
+        }`}
+      >
         {messages.length === 0 && (
-          <p className="text-sm text-zinc-500">
+          <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
             Try: “Podcast about urban composting for renters — need a punchy cold
             open.”
           </p>
@@ -78,15 +104,23 @@ function BrainstormPanel({
             key={i}
             className={`rounded-lg px-3 py-2 text-sm leading-relaxed ${
               m.role === "user"
-                ? "ml-8 bg-violet-600/20 text-violet-100 ring-1 ring-violet-500/30"
-                : "mr-8 bg-zinc-800/60 text-zinc-200"
+                ? isDark
+                  ? "ml-8 bg-violet-600/20 text-violet-100 ring-1 ring-violet-500/30"
+                  : "ml-8 bg-violet-100 text-violet-800 ring-1 ring-violet-200"
+                : isDark
+                  ? "mr-8 bg-zinc-800/60 text-zinc-200"
+                  : "mr-8 bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200"
             }`}
           >
-            {m.content}
+            <span className="whitespace-pre-wrap">{m.content}</span>
           </div>
         ))}
         {loading && (
-          <div className="mr-8 rounded-lg bg-zinc-800/40 px-3 py-2 text-sm text-zinc-400">
+          <div
+            className={`mr-8 rounded-lg px-3 py-2 text-sm ${
+              isDark ? "bg-zinc-800/40 text-zinc-400" : "bg-zinc-100 text-zinc-600"
+            }`}
+          >
             Thinking…
           </div>
         )}
@@ -109,7 +143,11 @@ function BrainstormPanel({
           }}
           placeholder="Describe your show idea or paste rough notes…"
           rows={3}
-          className="min-h-[88px] flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-violet-500/0 transition placeholder:text-zinc-500 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/30"
+          className={`min-h-[88px] flex-1 resize-none rounded-xl border px-3 py-2 text-sm outline-none ring-violet-500/0 transition focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/30 ${
+            isDark
+              ? "border-zinc-700 bg-zinc-900/80 text-zinc-100 placeholder:text-zinc-500"
+              : "border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400"
+          }`}
         />
         <button
           type="button"
@@ -138,6 +176,7 @@ function StudioPanel({
   onGenerateScript,
   scriptLoading,
   error,
+  isDark,
 }: {
   topic: string;
   setTopic: (v: string) => void;
@@ -152,52 +191,91 @@ function StudioPanel({
   onGenerateScript: () => void;
   scriptLoading: boolean;
   error: string | null;
+  isDark: boolean;
 }) {
   return (
-    <section className="flex min-h-[420px] flex-col rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 shadow-xl backdrop-blur-sm">
+    <section
+      className={`flex min-h-[420px] flex-col rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
+        isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
+      }`}
+    >
       <header className="mb-4">
-        <h2 className="font-display text-2xl text-zinc-50">Script</h2>
-        <p className="mt-1 text-sm text-zinc-400">
+        <h2 className={`font-display text-2xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+          Script
+        </h2>
+        <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
           Generate a full episode script and edit it before recording.
         </p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <label
+          className={`block text-xs font-medium uppercase tracking-wide ${
+            isDark ? "text-zinc-500" : "text-zinc-600"
+          }`}
+        >
           Topic / episode focus
           <input
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-sky-500/50"
+            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
+              isDark
+                ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+                : "border-zinc-300 bg-white text-zinc-900"
+            }`}
             placeholder="e.g. How cities quietly shape what we eat"
           />
         </label>
-        <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <label
+          className={`block text-xs font-medium uppercase tracking-wide ${
+            isDark ? "text-zinc-500" : "text-zinc-600"
+          }`}
+        >
           Tone
           <input
             value={tone}
             onChange={(e) => setTone(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-sky-500/50"
+            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
+              isDark
+                ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+                : "border-zinc-300 bg-white text-zinc-900"
+            }`}
             placeholder="friendly expert, curious, warm"
           />
         </label>
-        <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
+        <label
+          className={`block text-xs font-medium uppercase tracking-wide ${
+            isDark ? "text-zinc-500" : "text-zinc-600"
+          }`}
+        >
           Target length
           <input
             value={length}
             onChange={(e) => setLength(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-sky-500/50"
+            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
+              isDark
+                ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+                : "border-zinc-300 bg-white text-zinc-900"
+            }`}
             placeholder="8–12 minute episode"
           />
         </label>
       </div>
 
-      <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <label
+        className={`mt-3 block text-xs font-medium uppercase tracking-wide ${
+          isDark ? "text-zinc-500" : "text-zinc-600"
+        }`}
+      >
         Extra notes (optional)
         <input
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-sky-500/50"
+          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
+            isDark
+              ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+              : "border-zinc-300 bg-white text-zinc-900"
+          }`}
           placeholder="Mention guest Dr. Lee; avoid politics"
         />
       </label>
@@ -215,7 +293,9 @@ function StudioPanel({
           type="button"
           onClick={() => navigator.clipboard.writeText(script)}
           disabled={!script.trim()}
-          className="rounded-xl text-sm text-zinc-400 underline-offset-4 hover:text-zinc-200 hover:underline disabled:opacity-30"
+          className={`rounded-xl text-sm underline-offset-4 hover:underline disabled:opacity-30 ${
+            isDark ? "text-zinc-400 hover:text-zinc-200" : "text-zinc-500 hover:text-zinc-800"
+          }`}
         >
           Copy script
         </button>
@@ -227,13 +307,21 @@ function StudioPanel({
         </p>
       )}
 
-      <label className="mt-4 block flex-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <label
+        className={`mt-4 block flex-1 text-xs font-medium uppercase tracking-wide ${
+          isDark ? "text-zinc-500" : "text-zinc-600"
+        }`}
+      >
         Script
         <textarea
           value={script}
           onChange={(e) => setScript(e.target.value)}
           rows={14}
-          className="mt-1 w-full flex-1 resize-y rounded-xl border border-zinc-700 bg-zinc-950/60 px-3 py-2 font-mono text-sm leading-relaxed text-zinc-100 outline-none focus:border-sky-500/50"
+          className={`mt-1 w-full flex-1 resize-y rounded-xl border px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-sky-500/50 ${
+            isDark
+              ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+              : "border-zinc-300 bg-white text-zinc-900"
+          }`}
           placeholder="Generated script appears here — edit freely."
         />
       </label>
@@ -263,6 +351,20 @@ export default function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectingHistory, setSelectingHistory] = useState(false);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<number[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  });
+  const isDark = theme === "dark";
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     fetch(apiUrl("/api/health"))
@@ -277,12 +379,35 @@ export default function App() {
     try {
       const { items } = await apiGet<{ items: HistoryItem[] }>("/api/history?limit=25");
       setHistory(items);
+      setSelectedHistoryIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : "Failed to load history");
     } finally {
       setHistoryLoading(false);
     }
   }, []);
+
+  const toggleHistorySelection = useCallback((id: number) => {
+    setSelectedHistoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
+
+  const deleteSelectedHistory = useCallback(async () => {
+    if (selectedHistoryIds.length === 0 || deleteLoading) return;
+    setHistoryError(null);
+    setDeleteLoading(true);
+    try {
+      await apiDelete("/api/history", { ids: selectedHistoryIds });
+      setSelectedHistoryIds([]);
+      setSelectingHistory(false);
+      await loadHistory();
+    } catch (e) {
+      setHistoryError(e instanceof Error ? e.message : "Failed to delete history");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }, [selectedHistoryIds, deleteLoading, loadHistory]);
 
   useEffect(() => {
     loadHistory().catch(() => {});
@@ -397,14 +522,25 @@ export default function App() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400/90">
             Prototype
           </p>
-          <h1 className="font-display mt-1 text-4xl text-white sm:text-5xl">
+          <h1 className={`font-display mt-1 text-4xl sm:text-5xl ${isDark ? "text-white" : "text-zinc-900"}`}>
             AI Podcast Studio
           </h1>
-          <p className="mt-2 max-w-xl text-zinc-400">
+          <p className={`mt-2 max-w-xl ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
             Brainstorm with a producer-style chatbot, then generate full scripts
             — API key stays on the server.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+          className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+            isDark
+              ? "border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:bg-zinc-800"
+              : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+          }`}
+        >
+          {isDark ? "Light mode" : "Dark mode"}
+        </button>
         {health && !health.hasKey && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
             Add <code className="rounded bg-black/30 px-1">OPENROUTER_API_KEY</code> to{" "}
@@ -414,7 +550,11 @@ export default function App() {
         )}
       </header>
 
-      <div className="mb-6 flex gap-2 rounded-xl bg-zinc-900/50 p-1 ring-1 ring-zinc-800">
+      <div
+        className={`mb-6 flex gap-2 rounded-xl p-1 ring-1 ${
+          isDark ? "bg-zinc-900/50 ring-zinc-800" : "bg-zinc-100/70 ring-zinc-300"
+        }`}
+      >
         {(
           [
             ["brainstorm", "Brainstorm"],
@@ -427,8 +567,12 @@ export default function App() {
             onClick={() => setTab(id)}
             className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition ${
               tab === id
-                ? "bg-zinc-800 text-white shadow ring-1 ring-zinc-700"
-                : "text-zinc-500 hover:text-zinc-300"
+                ? isDark
+                  ? "bg-zinc-800 text-white shadow ring-1 ring-zinc-700"
+                  : "bg-white text-zinc-900 shadow ring-1 ring-zinc-200"
+                : isDark
+                  ? "text-zinc-500 hover:text-zinc-300"
+                  : "text-zinc-500 hover:text-zinc-700"
             }`}
           >
             {label}
@@ -445,6 +589,7 @@ export default function App() {
             onSend={sendChat}
             loading={chatLoading}
             error={chatError}
+            isDark={isDark}
           />
         ) : (
           <StudioPanel
@@ -461,13 +606,48 @@ export default function App() {
             onGenerateScript={generateScript}
             scriptLoading={scriptLoading}
             error={studioError}
+            isDark={isDark}
           />
         )}
 
-        <section className="mt-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 shadow-xl backdrop-blur-sm">
+        <section
+          className={`mt-6 rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
+            isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
+          }`}
+        >
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-display text-xl text-zinc-50">Saved history</h3>
+            <h3 className={`font-display text-xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+              Saved history
+            </h3>
             <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectingHistory((prev) => !prev);
+                  setSelectedHistoryIds([]);
+                }}
+                className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+                  selectingHistory
+                    ? "border-red-500/60 bg-red-500/10 text-red-300"
+                    : isDark
+                      ? "border-zinc-600 bg-zinc-800/80 text-zinc-100 hover:bg-zinc-700"
+                      : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+                }`}
+              >
+                {selectingHistory ? "Cancel selection" : "Select to delete"}
+              </button>
+              {selectingHistory && (
+                <button
+                  type="button"
+                  onClick={deleteSelectedHistory}
+                  disabled={deleteLoading || selectedHistoryIds.length === 0}
+                  className="rounded-xl bg-red-600 px-3 py-2 text-xs font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {deleteLoading
+                    ? "Deleting..."
+                    : `Delete selected (${selectedHistoryIds.length})`}
+                </button>
+              )}
               {tab === "brainstorm" ? (
                 <button
                   type="button"
@@ -488,7 +668,11 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => loadHistory()}
-                className="rounded-xl border border-zinc-600 bg-zinc-800/80 px-3 py-2 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
+                className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+                  isDark
+                    ? "border-zinc-600 bg-zinc-800/80 text-zinc-100 hover:bg-zinc-700"
+                    : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+                }`}
               >
                 Refresh
               </button>
@@ -499,34 +683,66 @@ export default function App() {
               {historyError}
             </p>
           )}
-          {historyLoading && <p className="text-sm text-zinc-500">Loading history…</p>}
+          {historyLoading && (
+            <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-600"}`}>
+              Loading history…
+            </p>
+          )}
           {!historyLoading && history.length === 0 && (
-            <p className="text-sm text-zinc-500">
+            <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-600"}`}>
               No saved entries yet. Save a brainstorm or script to keep it.
             </p>
           )}
           <div className="space-y-2">
             {history.map((item) => (
-              <button
-                type="button"
+              <div
                 key={item.id}
-                onClick={() => applyHistory(item)}
-                className="w-full rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-left text-sm hover:border-zinc-700 hover:bg-zinc-900/70"
+                className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
+                  isDark
+                    ? "border-zinc-800 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/70"
+                    : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
+                }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="truncate text-zinc-100">{item.title}</span>
-                  <span className="shrink-0 text-xs uppercase tracking-wide text-zinc-500">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {selectingHistory && (
+                      <input
+                        type="checkbox"
+                        checked={selectedHistoryIds.includes(item.id)}
+                        onChange={() => toggleHistorySelection(item.id)}
+                        className="h-4 w-4 accent-red-500"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        selectingHistory ? toggleHistorySelection(item.id) : applyHistory(item)
+                      }
+                      className={`truncate text-left ${
+                        isDark ? "text-zinc-100" : "text-zinc-900"
+                      }`}
+                    >
+                      {item.title}
+                    </button>
+                  </div>
+                  <span
+                    className={`shrink-0 text-xs uppercase tracking-wide ${
+                      isDark ? "text-zinc-500" : "text-zinc-500"
+                    }`}
+                  >
                     {item.kind}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-zinc-500">{item.createdAt}</p>
-              </button>
+                <p className={`mt-1 text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
+                  {item.createdAt}
+                </p>
+              </div>
             ))}
           </div>
         </section>
       </main>
 
-      <footer className="mt-12 text-center text-xs text-zinc-600">
+      <footer className={`mt-12 text-center text-xs ${isDark ? "text-zinc-600" : "text-zinc-500"}`}>
         Uses OpenRouter for chat + script generation.
       </footer>
     </div>

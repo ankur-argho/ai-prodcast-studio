@@ -73,7 +73,11 @@ const brainstormSystem = `You are a sharp podcast producer and story editor. You
 - episode titles and hooks
 - audience angles and guest ideas
 - segment outlines and cold opens
-Be concise. Use short bullets when listing ideas. Ask a clarifying question only when the topic is too vague.`;
+Always respond in clear point-by-point format:
+1) Use short numbered sections with concise bullet points.
+2) Keep each bullet to one idea.
+3) Leave a blank line between sections for readability.
+Ask a clarifying question only when the topic is too vague.`;
 
 const scriptSystem = `You write engaging podcast scripts meant to be read aloud.
 
@@ -251,6 +255,27 @@ app.post("/api/history", (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to save history" });
+  }
+});
+
+app.delete("/api/history", (req, res) => {
+  try {
+    const idsRaw = req.body?.ids;
+    const ids = Array.isArray(idsRaw)
+      ? idsRaw.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "ids must be a non-empty array of positive integers" });
+      return;
+    }
+    const placeholders = ids.map(() => "?").join(", ");
+    const result = db
+      .prepare(`DELETE FROM history_items WHERE id IN (${placeholders})`)
+      .run(...ids);
+    res.json({ deleted: result.changes });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete history items" });
   }
 });
 
