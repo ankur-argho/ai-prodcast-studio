@@ -416,6 +416,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Check URL parameters for OAuth errors
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashString = window.location.hash.startsWith("#") ? window.location.hash.substring(1) : "";
+    const hashParams = new URLSearchParams(hashString);
+    const errorDesc = searchParams.get("error_description") || hashParams.get("error_description");
+    const errorMsg = searchParams.get("error") || hashParams.get("error");
+
+    if (errorDesc || errorMsg) {
+      const decoded = decodeURIComponent(errorDesc || errorMsg || "Authentication failed");
+      if (decoded.toLowerCase().includes("unable to exchange external code")) {
+        setToastMsg("Google Sign In Error: Please ensure Google OAuth Client ID & Secret are enabled in your Supabase Dashboard.");
+      } else {
+        setToastMsg(`Auth Error: ${decoded}`);
+      }
+      // Clean up URL search & hash parameters
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setTimeout(() => setToastMsg(null), 8000);
+    }
+
     if (!supabase) return;
 
     supabase.auth.getSession().then(({ data }) => {
