@@ -15,10 +15,13 @@ const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5174")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.resolve(
-  __dirname,
-  process.env.DB_PATH || "../data/history.db",
-);
+const isVercel = Boolean(process.env.VERCEL);
+const dbPath = isVercel
+  ? "/tmp/history.db"
+  : path.resolve(
+      __dirname,
+      process.env.DB_PATH || "../data/history.db",
+    );
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.exec(`
@@ -288,11 +291,15 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`AI Podcast Studio API http://127.0.0.1:${PORT}`);
-  if (!client) {
-    console.warn(
-      "Warning: OPENROUTER_API_KEY missing — API routes will return 503.",
-    );
-  }
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`AI Podcast Studio API http://127.0.0.1:${PORT}`);
+    if (!client) {
+      console.warn(
+        "Warning: OPENROUTER_API_KEY missing — API routes will return 503.",
+      );
+    }
+  });
+}
+
+export default app;
