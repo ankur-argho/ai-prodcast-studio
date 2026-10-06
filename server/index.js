@@ -6,71 +6,67 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-const PORT = Number(process.env.PORT) || 8787;
-const apiKey = process.env.OPENROUTER_API_KEY;
-const siteUrl = process.env.OPENROUTER_SITE_URL || "http://localhost:5174";
-const siteName = process.env.OPENROUTER_SITE_NAME || "AI Podcast Studio";
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5174")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const isVercel = Boolean(process.env.VERCEL);
-const dbPath = isVercel
-  ? "/tmp/history.db"
-  : path.resolve(
-      __dirname,
-      process.env.DB_PATH || "../data/history.db",
-    );
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-const db = new Database(dbPath);
-db.exec(`
-  CREATE TABLE IF NOT EXISTS history_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK (kind IN ('brainstorm', 'script')),
-    title TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )
-`);
 
-const client = apiKey
-  ? new OpenAI({
-      apiKey,
-      baseURL: "https://openrouter.ai/api/v1",
-      defaultHeaders: {
-        "HTTP-Referer": siteUrl,
-        "X-Title": siteName,
-      },
-    })
-  : null;
+const PORT = Number(process.env.PORT) || 8787;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let db = null;
+function getDb() {
+  if (!db) {
+    try {
+      const isVercel = Boolean(process.env.VERCEL);
+      const dbPath = isVercel
+        ? "/tmp/history.db"
+        : path.resolve(__dirname, process.env.DB_PATH || "../data/history.db");
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      db = new Database(dbPath);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS history_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL CHECK (kind IN ('brainstorm', 'script')),
+          title TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (err) {
+      console.error("Database initialization notice:", err?.message || err);
+      return null;
+    }
+  }
+  return db;
+}
+
+function getClient() {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return null;
+  const siteUrl = process.env.OPENROUTER_SITE_URL || "https://ai-podcast-studio.vercel.app";
+  const siteName = process.env.OPENROUTER_SITE_NAME || "AI Podcast Studio";
+  return new OpenAI({
+    apiKey,
+    baseURL: "https://openrouter.ai/api/v1",
+    defaultHeaders: {
+      "HTTP-Referer": siteUrl,
+      "X-Title": siteName,
+    },
+  });
+}
 
 const app = express();
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error("Origin not allowed by CORS"));
-    },
-  }),
-);
+app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
 function requireKey(res) {
+  const client = getClient();
   if (!client) {
     res.status(503).json({
       error:
-        "OPENROUTER_API_KEY is not set. Create a .env file in ai-podcast-studio (see .env.example).",
+        "OPENROUTER_API_KEY is not set. Add it in Vercel Environment Variables or .env.",
     });
     return false;
   }
-  return true;
+  return client;
 }
-
-const MODEL_ID = process.env.OPENROUTER_MODEL || "openrouter/auto";
 
 const brainstormSystem = `You are a sharp podcast producer and story editor. You help brainstorm:
 - episode titles and hooks
@@ -92,7 +88,9 @@ Rules:
 - Aim for the target length; slightly under is OK.`;
 
 app.post("/api/chat", async (req, res) => {
-  if (!requireKey(res)) return;
+  const client = requireKey(res);
+  if (!client) return;
+  const modelId = process.env.OPENROUTER_MODEL || "openrouter/auto";
   try {
     const { messages = [] } = req.body;
     const validMessages = (Array.isArray(messages) ? messages : [])
@@ -102,19 +100,19 @@ app.post("/api/chat", async (req, res) => {
         content: String(m.content ?? ""),
       }));
     const completion = await client.chat.completions.create({
-      model: MODEL_ID,
+      model: modelId,
       messages: [{ role: "system", content: brainstormSystem }, ...validMessages],
       temperature: 0.85,
     });
     const text = completion.choices[0]?.message?.content ?? "";
     res.json({ message: text });
   } catch (err) {
-    console.error(err);
+    console.error("Chat error:", err);
     const msg = String(err?.message || "");
     if (msg.includes("No endpoints found")) {
       res.status(502).json({
         error:
-          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL=openrouter/auto or another available model in .env, then restart.",
+          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL to another model (e.g. google/gemini-2.5-flash or meta-llama/llama-3.3-70b-instruct:free) in Vercel settings.",
       });
       return;
     }
@@ -123,7 +121,9 @@ app.post("/api/chat", async (req, res) => {
 });
 
 app.post("/api/script", async (req, res) => {
-  if (!requireKey(res)) return;
+  const client = requireKey(res);
+  if (!client) return;
+  const modelId = process.env.OPENROUTER_MODEL || "openrouter/auto";
   try {
     const {
       topic,
@@ -145,7 +145,7 @@ ${extra ? `Notes: ${extra}` : ""}
 Write the full narration script only — no meta commentary.`;
 
     const completion = await client.chat.completions.create({
-      model: MODEL_ID,
+      model: modelId,
       messages: [
         { role: "system", content: scriptSystem },
         { role: "user", content: user },
@@ -155,12 +155,12 @@ Write the full narration script only — no meta commentary.`;
     const script = completion.choices[0]?.message?.content ?? "";
     res.json({ script });
   } catch (err) {
-    console.error(err);
+    console.error("Script error:", err);
     const msg = String(err?.message || "");
     if (msg.includes("No endpoints found")) {
       res.status(502).json({
         error:
-          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL=openrouter/auto or another available model in .env, then restart.",
+          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL to another available model.",
       });
       return;
     }
@@ -170,6 +170,11 @@ Write the full narration script only — no meta commentary.`;
 
 app.get("/api/history", (_req, res) => {
   try {
+    const database = getDb();
+    if (!database) {
+      res.json({ items: [] });
+      return;
+    }
     const limit = Math.min(
       Math.max(Number(_req.query.limit) || 20, 1),
       100,
@@ -179,7 +184,7 @@ app.get("/api/history", (_req, res) => {
         ? _req.query.kind
         : null;
     const rows = kind
-      ? db
+      ? database
           .prepare(
             `SELECT id, kind, title, payload, created_at
              FROM history_items
@@ -188,7 +193,7 @@ app.get("/api/history", (_req, res) => {
              LIMIT ?`,
           )
           .all(kind, limit)
-      : db
+      : database
           .prepare(
             `SELECT id, kind, title, payload, created_at
              FROM history_items
@@ -207,13 +212,18 @@ app.get("/api/history", (_req, res) => {
       })),
     });
   } catch (err) {
-    console.error(err);
+    console.error("History fetch error:", err);
     res.status(500).json({ error: "Failed to load history" });
   }
 });
 
 app.post("/api/history", (req, res) => {
   try {
+    const database = getDb();
+    if (!database) {
+      res.status(500).json({ error: "Database not available" });
+      return;
+    }
     const { kind, title, payload } = req.body ?? {};
     if (kind !== "brainstorm" && kind !== "script") {
       res.status(400).json({ error: "kind must be brainstorm or script" });
@@ -233,13 +243,13 @@ app.post("/api/history", (req, res) => {
       return;
     }
 
-    const info = db
+    const info = database
       .prepare(
         `INSERT INTO history_items (kind, title, payload)
          VALUES (?, ?, ?)`,
       )
       .run(kind, cleanTitle, JSON.stringify(payload));
-    const row = db
+    const row = database
       .prepare(
         `SELECT id, kind, title, payload, created_at
          FROM history_items
@@ -256,13 +266,18 @@ app.post("/api/history", (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    console.error("History save error:", err);
     res.status(500).json({ error: "Failed to save history" });
   }
 });
 
 app.delete("/api/history", (req, res) => {
   try {
+    const database = getDb();
+    if (!database) {
+      res.status(500).json({ error: "Database not available" });
+      return;
+    }
     const idsRaw = req.body?.ids;
     const ids = Array.isArray(idsRaw)
       ? idsRaw.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -272,21 +287,22 @@ app.delete("/api/history", (req, res) => {
       return;
     }
     const placeholders = ids.map(() => "?").join(", ");
-    const result = db
+    const result = database
       .prepare(`DELETE FROM history_items WHERE id IN (${placeholders})`)
       .run(...ids);
     res.json({ deleted: result.changes });
   } catch (err) {
-    console.error(err);
+    console.error("History delete error:", err);
     res.status(500).json({ error: "Failed to delete history items" });
   }
 });
 
 app.get("/api/health", (_req, res) => {
+  const client = getClient();
   res.json({
     ok: true,
     hasKey: Boolean(client),
-    model: MODEL_ID,
+    model: process.env.OPENROUTER_MODEL || "openrouter/auto",
     provider: "openrouter",
   });
 });
@@ -294,11 +310,6 @@ app.get("/api/health", (_req, res) => {
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`AI Podcast Studio API http://127.0.0.1:${PORT}`);
-    if (!client) {
-      console.warn(
-        "Warning: OPENROUTER_API_KEY missing — API routes will return 503.",
-      );
-    }
   });
 }
 
