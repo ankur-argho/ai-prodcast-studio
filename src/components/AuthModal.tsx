@@ -6,15 +6,22 @@ interface AuthModalProps {
   onClose: () => void;
   isDark: boolean;
   initialMode?: "signin" | "signup";
+  onLoginSuccess?: (name: string) => void;
 }
 
-export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: AuthModalProps) {
+export function AuthModal({
+  isOpen,
+  onClose,
+  isDark,
+  initialMode = "signin",
+  onLoginSuccess,
+}: AuthModalProps) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -49,6 +56,22 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
     }
   };
 
+  // Helper to check if an email exists in Supabase
+  const checkEmailExists = async (targetEmail: string): Promise<boolean | null> => {
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase.rpc("check_email_exists", {
+        email_text: targetEmail.trim().toLowerCase(),
+      });
+      if (!error && typeof data === "boolean") {
+        return data;
+      }
+    } catch {
+      // Ignore RPC failure if SQL function not created yet
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     resetForm();
@@ -75,6 +98,16 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
       }
 
       setLoading(true);
+
+      // Check if account already exists
+      const exists = await checkEmailExists(cleanEmail);
+      if (exists === true) {
+        setLoading(false);
+        setErrorMsg("An account with this email already exists. Please sign in.");
+        setMode("signin");
+        return;
+      }
+
       try {
         const { data, error } = await supabase.auth.signUp({
           email: cleanEmail,
@@ -87,7 +120,11 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
         });
 
         if (error) {
-          if (error.message.toLowerCase().includes("already registered") || error.status === 400) {
+          if (
+            error.message.toLowerCase().includes("already registered") ||
+            error.message.toLowerCase().includes("user_already_exists") ||
+            error.status === 400
+          ) {
             setErrorMsg("An account with this email already exists. Please sign in.");
             setMode("signin");
           } else {
@@ -96,38 +133,55 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
           return;
         }
 
-        // Handle case where user is already registered (Supabase identity check)
         if (data.user && data.user.identities && data.user.identities.length === 0) {
           setErrorMsg("An account with this email already exists. Please sign in.");
           setMode("signin");
           return;
         }
 
-        setSuccessMsg("Account created successfully! You can now sign in.");
+        setSuccessMsg("Account created successfully! Please sign in to continue.");
         setMode("signin");
         setPassword("");
         setConfirmPassword("");
       } catch (err) {
-        setErrorMsg(err instanceof Error ? err.message : "Sign up failed");
+        setErrorMsg(err instanceof Error ? err.message : "Registration failed");
       } finally {
         setLoading(false);
       }
     } else {
       // Sign In Flow
       setLoading(true);
+
+      // Check if account exists first
+      const isRegistered = await checkEmailExists(cleanEmail);
+      if (isRegistered === false) {
+        setLoading(false);
+        setErrorMsg("No account found with this email. Please sign up first.");
+        setMode("signup");
+        return;
+      }
+
       try {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
 
         if (error) {
-          if (error.message.toLowerCase().includes("invalid login credentials")) {
-            setErrorMsg("Invalid email or password. Please check your details and try again.");
+          const msg = error.message.toLowerCase();
+          if (msg.includes("invalid login credentials") || msg.includes("invalid_credentials")) {
+            setErrorMsg("Incorrect password. Please try again.");
           } else {
             setErrorMsg(error.message);
           }
           return;
+        }
+
+        const displayName =
+          data.user?.user_metadata?.full_name || data.user?.email?.split("@")[0] || "User";
+
+        if (onLoginSuccess) {
+          onLoginSuccess(displayName);
         }
 
         onClose();
@@ -152,7 +206,7 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
         <button
           type="button"
           onClick={onClose}
-          className={`absolute right-4 top-4 rounded-lg p-1 text-zinc-400 hover:text-zinc-200 transition`}
+          className="absolute right-4 top-4 rounded-lg p-1 text-zinc-400 hover:text-zinc-200 transition"
         >
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -162,12 +216,12 @@ export function AuthModal({ isOpen, onClose, isDark, initialMode = "signin" }: A
         {/* Modal Header */}
         <div className="mb-6 text-center">
           <h2 className="font-display text-2xl font-bold">
-            {mode === "signin" ? "Welcome Back" : "Create an Account"}
+            {mode === "signin" ? "Sign In" : "Sign Up"}
           </h2>
           <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
             {mode === "signin"
-              ? "Sign in to access your saved brainstorms and scripts."
-              : "Sign up to start saving your podcast projects."}
+              ? "Sign in with your existing account."
+              : "Create a new account to get started."}
           </p>
         </div>
 

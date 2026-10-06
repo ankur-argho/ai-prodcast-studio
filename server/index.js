@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createClient } from "@supabase/supabase-js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,13 @@ function getDb() {
     }
   }
   return db;
+}
+
+function getSupabaseServer() {
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
 }
 
 function getClient() {
@@ -87,9 +95,81 @@ Rules:
 - Do not include sound effects stage directions unless asked.
 - Aim for the target length; slightly under is OK.`;
 
+app.get("/api/user/usage", async (req, res) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const supabase = getSupabaseServer();
+  if (!supabase || !token) {
+    res.json({ chatsUsed: 0, limitReached: false });
+    return;
+  }
+  try {
+    const { data } = await supabase.auth.getUser(token);
+    const user = data?.user;
+    if (!user) {
+      res.json({ chatsUsed: 0, limitReached: false });
+      return;
+    }
+    const { data: usage } = await supabase
+      .from("user_usages")
+      .select("chats_used")
+      .eq("user_id", user.id)
+      .single();
+    const chatsUsed = usage?.chats_used || 0;
+    res.json({ chatsUsed, limitReached: chatsUsed >= 1 });
+  } catch (err) {
+    res.json({ chatsUsed: 0, limitReached: false });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   const client = requireKey(res);
   if (!client) return;
+
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  const supabase = getSupabaseServer();
+  let user = null;
+
+  if (supabase && token) {
+    try {
+      const { data } = await supabase.auth.getUser(token);
+      user = data?.user || null;
+    } catch (err) {
+      console.error("Auth token verification error:", err);
+    }
+  }
+
+  if (supabase && !user) {
+    res.status(401).json({
+      error: "Authentication required. Please sign in or create an account.",
+      requireAuth: true,
+    });
+    return;
+  }
+
+  // Enforce 1 FREE CHAT LIMIT
+  if (supabase && user) {
+    try {
+      const { data: usage } = await supabase
+        .from("user_usages")
+        .select("chats_used")
+        .eq("user_id", user.id)
+        .single();
+
+      if (usage && usage.chats_used >= 1) {
+        res.status(403).json({
+          error: "You've used your free chat. Please upgrade to continue.",
+          limitReached: true,
+        });
+        return;
+      }
+    } catch (err) {
+      console.error("Usage check notice:", err?.message);
+    }
+  }
+
   const modelId = process.env.OPENROUTER_MODEL || "openrouter/auto";
   try {
     const { messages = [] } = req.body;
@@ -105,6 +185,26 @@ app.post("/api/chat", async (req, res) => {
       temperature: 0.85,
     });
     const text = completion.choices[0]?.message?.content ?? "";
+
+    // Increment chat count after completion success
+    if (supabase && user) {
+      try {
+        const { data: usage } = await supabase
+          .from("user_usages")
+          .select("chats_used")
+          .eq("user_id", user.id)
+          .single();
+        const currentCount = usage?.chats_used || 0;
+        await supabase.from("user_usages").upsert({
+          user_id: user.id,
+          chats_used: currentCount + 1,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error("Failed to update user usage count:", err);
+      }
+    }
+
     res.json({ message: text });
   } catch (err) {
     console.error("Chat error:", err);
@@ -112,7 +212,7 @@ app.post("/api/chat", async (req, res) => {
     if (msg.includes("No endpoints found")) {
       res.status(502).json({
         error:
-          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL to another model (e.g. google/gemini-2.5-flash or meta-llama/llama-3.3-70b-instruct:free) in Vercel settings.",
+          "Selected OpenRouter model has no active endpoints. Set OPENROUTER_MODEL to another model.",
       });
       return;
     }

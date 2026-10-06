@@ -20,10 +20,14 @@ function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
-async function apiJson<T>(path: string, body: unknown): Promise<T> {
+async function apiJson<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const res = await fetch(apiUrl(path), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -63,6 +67,9 @@ function BrainstormPanel({
   loading,
   error,
   isDark,
+  chatLimitReached,
+  user,
+  onOpenSignIn,
 }: {
   messages: ChatMessage[];
   draft: string;
@@ -71,6 +78,9 @@ function BrainstormPanel({
   loading: boolean;
   error: string | null;
   isDark: boolean;
+  chatLimitReached: boolean;
+  user: User | null;
+  onOpenSignIn: () => void;
 }) {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -83,13 +93,24 @@ function BrainstormPanel({
         isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
       }`}
     >
-      <header className="mb-4">
-        <h2 className={`font-display text-2xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
-          Brainstorm
-        </h2>
-        <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-          Chat through angles, titles, segments, and hooks before you write.
-        </p>
+      <header className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className={`font-display text-2xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+            Brainstorm
+          </h2>
+          <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+            Chat through angles, titles, segments, and hooks before you write.
+          </p>
+        </div>
+        {user && (
+          <span className={`text-xs px-2.5 py-1 rounded-full border ${
+            chatLimitReached
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-400 font-semibold"
+              : "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+          }`}>
+            {chatLimitReached ? "1/1 Free Chat Used" : "1 Free Chat Remaining"}
+          </span>
+        )}
       </header>
       <div
         className={`flex-1 space-y-3 overflow-y-auto rounded-xl p-4 ring-1 ${
@@ -129,14 +150,31 @@ function BrainstormPanel({
         )}
         <div ref={bottom} />
       </div>
+
+      {!user ? (
+        <div className="mt-4 rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-center text-xs text-violet-300">
+          Please{" "}
+          <button type="button" onClick={onOpenSignIn} className="font-bold underline hover:text-white">
+            Sign In
+          </button>{" "}
+          or create an account to start brainstorming.
+        </div>
+      ) : chatLimitReached ? (
+        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-center text-xs font-medium text-amber-300">
+          You've used your free chat. Upgrade to continue.
+        </div>
+      ) : null}
+
       {error && (
         <p className="mt-2 text-sm text-red-400" role="alert">
           {error}
         </p>
       )}
+
       <div className="mt-4 flex gap-2">
         <textarea
           value={draft}
+          disabled={chatLimitReached || !user}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -144,9 +182,15 @@ function BrainstormPanel({
               onSend();
             }
           }}
-          placeholder="Describe your show idea or paste rough notes…"
+          placeholder={
+            !user
+              ? "Please sign in to start chatting…"
+              : chatLimitReached
+              ? "Free chat limit reached. Upgrade to continue."
+              : "Describe your show idea or paste rough notes…"
+          }
           rows={3}
-          className={`min-h-[88px] flex-1 resize-none rounded-xl border px-3 py-2 text-sm outline-none ring-violet-500/0 transition focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/30 ${
+          className={`min-h-[88px] flex-1 resize-none rounded-xl border px-3 py-2 text-sm outline-none ring-violet-500/0 transition focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/30 disabled:cursor-not-allowed disabled:opacity-50 ${
             isDark
               ? "border-zinc-700 bg-zinc-900/80 text-zinc-100 placeholder:text-zinc-500"
               : "border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400"
@@ -155,7 +199,7 @@ function BrainstormPanel({
         <button
           type="button"
           onClick={onSend}
-          disabled={loading || !draft.trim()}
+          disabled={loading || !draft.trim() || chatLimitReached || !user}
           className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Send
@@ -260,49 +304,35 @@ function StudioPanel({
                 ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
                 : "border-zinc-300 bg-white text-zinc-900"
             }`}
-            placeholder="8–12 minute episode"
+          />
+        </label>
+        <label
+          className={`block text-xs font-medium uppercase tracking-wide ${
+            isDark ? "text-zinc-500" : "text-zinc-600"
+          }`}
+        >
+          Extra notes (optional)
+          <input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
+              isDark
+                ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
+                : "border-zinc-300 bg-white text-zinc-900"
+            }`}
+            placeholder="guest names, sponsor shoutout…"
           />
         </label>
       </div>
 
-      <label
-        className={`mt-3 block text-xs font-medium uppercase tracking-wide ${
-          isDark ? "text-zinc-500" : "text-zinc-600"
-        }`}
+      <button
+        type="button"
+        onClick={onGenerateScript}
+        disabled={scriptLoading || !topic.trim()}
+        className="mt-4 self-start rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-900/40 transition hover:bg-violet-500 disabled:opacity-40"
       >
-        Extra notes (optional)
-        <input
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-sky-500/50 ${
-            isDark
-              ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
-              : "border-zinc-300 bg-white text-zinc-900"
-          }`}
-          placeholder="Mention guest Dr. Lee; avoid politics"
-        />
-      </label>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onGenerateScript}
-          disabled={scriptLoading || !topic.trim()}
-          className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-sky-900/30 hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {scriptLoading ? "Writing script…" : "Generate script"}
-        </button>
-        <button
-          type="button"
-          onClick={() => navigator.clipboard.writeText(script)}
-          disabled={!script.trim()}
-          className={`rounded-xl text-sm underline-offset-4 hover:underline disabled:opacity-30 ${
-            isDark ? "text-zinc-400 hover:text-zinc-200" : "text-zinc-500 hover:text-zinc-800"
-          }`}
-        >
-          Copy script
-        </button>
-      </div>
+        {scriptLoading ? "Drafting script…" : "Generate script"}
+      </button>
 
       {error && (
         <p className="mt-2 text-sm text-red-400" role="alert">
@@ -310,25 +340,19 @@ function StudioPanel({
         </p>
       )}
 
-      <label
-        className={`mt-4 block flex-1 text-xs font-medium uppercase tracking-wide ${
-          isDark ? "text-zinc-500" : "text-zinc-600"
-        }`}
-      >
-        Script
+      <div className="mt-4 flex flex-1 flex-col">
         <textarea
           value={script}
           onChange={(e) => setScript(e.target.value)}
-          rows={14}
-          className={`mt-1 w-full flex-1 resize-y rounded-xl border px-3 py-2 font-mono text-sm leading-relaxed outline-none focus:border-sky-500/50 ${
+          placeholder="Script output will appear here. Edit freely."
+          rows={12}
+          className={`min-h-[260px] flex-1 resize-y rounded-xl border p-4 text-sm font-mono leading-relaxed outline-none focus:border-violet-500/50 ${
             isDark
-              ? "border-zinc-700 bg-zinc-950/60 text-zinc-100"
-              : "border-zinc-300 bg-white text-zinc-900"
+              ? "border-zinc-700 bg-zinc-950/70 text-zinc-100 placeholder:text-zinc-600"
+              : "border-zinc-300 bg-white text-zinc-900 placeholder:text-zinc-400"
           }`}
-          placeholder="Generated script appears here — edit freely."
         />
-      </label>
-
+      </div>
     </section>
   );
 }
@@ -351,9 +375,20 @@ export default function App() {
   const [script, setScript] = useState("");
   const [scriptLoading, setScriptLoading] = useState(false);
   const [studioError, setStudioError] = useState<string | null>(null);
+
   const [user, setUser] = useState<User | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
+  const [chatsUsed, setChatsUsed] = useState(0);
+  const [chatLimitReached, setChatLimitReached] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectingHistory, setSelectingHistory] = useState(false);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<(number | string)[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const openSignIn = () => {
     setAuthModalMode("signin");
@@ -364,28 +399,63 @@ export default function App() {
     setAuthModalMode("signup");
     setAuthModalOpen(true);
   };
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [selectingHistory, setSelectingHistory] = useState(false);
-  const [selectedHistoryIds, setSelectedHistoryIds] = useState<(number | string)[]>([]);
-  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const checkUserUsage = useCallback(async (token?: string) => {
+    if (!token) {
+      setChatsUsed(0);
+      setChatLimitReached(false);
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl("/api/user/usage"), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.chatsUsed !== undefined) {
+        setChatsUsed(data.chatsUsed);
+        setChatLimitReached(Boolean(data.limitReached || data.chatsUsed >= 1));
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      if (data.session?.access_token) {
+        checkUserUsage(data.session.access_token);
+      }
     });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.access_token) {
+        checkUserUsage(session.access_token);
+      } else {
+        setChatsUsed(0);
+        setChatLimitReached(false);
+      }
+
+      if (event === "SIGNED_IN") {
+        setToastMsg("Welcome back! 👋");
+        setTimeout(() => setToastMsg(null), 4000);
+      }
+    });
+
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [checkUserUsage]);
 
   const handleLogout = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
+    setToastMsg("You have been signed out successfully.");
+    setTimeout(() => setToastMsg(null), 3000);
   };
 
   const [theme, setTheme] = useState<Theme>(() => {
@@ -477,24 +547,47 @@ export default function App() {
   const sendChat = useCallback(async () => {
     const text = chatDraft.trim();
     if (!text || chatLoading) return;
+
+    if (!user) {
+      setChatError("Please sign in or create an account to use AI chat.");
+      openSignIn();
+      return;
+    }
+
+    if (chatLimitReached || chatsUsed >= 1) {
+      setChatError("You've used your free chat. Please upgrade to continue.");
+      return;
+    }
+
     setChatError(null);
     setChatDraft("");
     const next: ChatMessage[] = [...chatMessages, { role: "user", content: text }];
     setChatMessages(next);
     setChatLoading(true);
+
     try {
+      const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+      const token = session?.access_token;
       const msgs = next.map((m) => ({ role: m.role, content: m.content }));
-      const { message } = await apiJson<{ message: string }>("/api/chat", {
-        messages: msgs,
-      });
+      const { message } = await apiJson<{ message: string }>(
+        "/api/chat",
+        { messages: msgs },
+        token
+      );
       setChatMessages([...next, { role: "assistant", content: message }]);
+      setChatsUsed((prev) => prev + 1);
+      setChatLimitReached(true);
     } catch (e) {
-      setChatError(e instanceof Error ? e.message : "Request failed");
+      const msg = e instanceof Error ? e.message : "Request failed";
+      if (msg.includes("used your free chat")) {
+        setChatLimitReached(true);
+      }
+      setChatError(msg);
       setChatMessages(next);
     } finally {
       setChatLoading(false);
     }
-  }, [chatDraft, chatLoading, chatMessages]);
+  }, [chatDraft, chatLoading, chatMessages, user, chatLimitReached, chatsUsed]);
 
   const generateScript = useCallback(async () => {
     if (!topic.trim()) return;
@@ -604,6 +697,13 @@ export default function App() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-10 sm:px-6">
+      {/* Toast Notification Banner */}
+      {toastMsg && (
+        <div className="fixed top-5 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-emerald-500/40 bg-zinc-900/90 px-5 py-3 text-sm font-semibold text-emerald-400 shadow-2xl backdrop-blur-md transition-all">
+          {toastMsg}
+        </div>
+      )}
+
       <header className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400/90">
@@ -632,14 +732,14 @@ export default function App() {
                 </div>
               )}
               <span className="font-semibold text-violet-400">
-                Welcome back, {user.user_metadata?.full_name || user.email?.split("@")[0]}!
+                Welcome back, {user.user_metadata?.full_name || user.email?.split("@")[0]}! 👋
               </span>
               <button
                 type="button"
                 onClick={handleLogout}
                 className="ml-1 rounded-lg bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-400 transition hover:bg-rose-500/20"
               >
-                Sign Out
+                Log Out
               </button>
             </div>
           ) : (
@@ -726,6 +826,9 @@ export default function App() {
             loading={chatLoading}
             error={chatError}
             isDark={isDark}
+            chatLimitReached={chatLimitReached}
+            user={user}
+            onOpenSignIn={openSignIn}
           />
         ) : (
           <StudioPanel
@@ -747,48 +850,38 @@ export default function App() {
         )}
 
         <section
-          className={`mt-6 rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
+          className={`mt-10 rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
             isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
           }`}
         >
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className={`font-display text-xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
-              Saved history
-            </h3>
-            <div className="flex gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className={`font-display text-xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
+                Saved history
+              </h2>
+              <p className={`mt-0.5 text-xs ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+                No saved entries yet. Save a brainstorm or script to keep it.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setSelectingHistory((prev) => !prev);
-                  setSelectedHistoryIds([]);
-                }}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+                onClick={() => setSelectingHistory((prev) => !prev)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
                   selectingHistory
-                    ? "border-red-500/60 bg-red-500/10 text-red-300"
+                    ? "border-red-500/50 bg-red-500/10 text-red-400"
                     : isDark
-                      ? "border-zinc-600 bg-zinc-800/80 text-zinc-100 hover:bg-zinc-700"
-                      : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+                    ? "border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800"
+                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
                 }`}
               >
                 {selectingHistory ? "Cancel selection" : "Select to delete"}
               </button>
-              {selectingHistory && (
-                <button
-                  type="button"
-                  onClick={deleteSelectedHistory}
-                  disabled={deleteLoading || selectedHistoryIds.length === 0}
-                  className="rounded-xl bg-red-600 px-3 py-2 text-xs font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {deleteLoading
-                    ? "Deleting..."
-                    : `Delete selected (${selectedHistoryIds.length})`}
-                </button>
-              )}
               {tab === "brainstorm" ? (
                 <button
                   type="button"
                   onClick={saveBrainstorm}
-                  className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-medium text-white hover:bg-violet-500"
+                  className="rounded-xl bg-violet-600 px-4 py-1.5 text-xs font-medium text-white shadow transition hover:bg-violet-500"
                 >
                   Save brainstorm
                 </button>
@@ -796,7 +889,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={saveScript}
-                  className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-500"
+                  className="rounded-xl bg-violet-600 px-4 py-1.5 text-xs font-medium text-white shadow transition hover:bg-violet-500"
                 >
                   Save script
                 </button>
@@ -804,32 +897,44 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => loadHistory()}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium ${
+                className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
                   isDark
-                    ? "border-zinc-600 bg-zinc-800/80 text-zinc-100 hover:bg-zinc-700"
-                    : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+                    ? "border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800"
+                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
                 }`}
               >
                 Refresh
               </button>
             </div>
           </div>
+
+          {selectingHistory && selectedHistoryIds.length > 0 && (
+            <div className="mb-4 flex items-center justify-between rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+              <span>{selectedHistoryIds.length} item(s) selected</span>
+              <button
+                type="button"
+                onClick={deleteSelectedHistory}
+                disabled={deleteLoading}
+                className="rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
+              >
+                {deleteLoading ? "Deleting…" : "Delete selected"}
+              </button>
+            </div>
+          )}
+
           {historyError && (
-            <p className="mb-2 text-sm text-red-400" role="alert">
+            <p className="mb-3 text-xs text-red-400" role="alert">
               {historyError}
             </p>
           )}
-          {historyLoading && (
-            <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-600"}`}>
+
+          {historyLoading && history.length === 0 && (
+            <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
               Loading history…
             </p>
           )}
-          {!historyLoading && history.length === 0 && (
-            <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-600"}`}>
-              No saved entries yet. Save a brainstorm or script to keep it.
-            </p>
-          )}
-          <div className="space-y-2">
+
+          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
             {history.map((item) => (
               <div
                 key={item.id}
@@ -887,6 +992,10 @@ export default function App() {
         onClose={() => setAuthModalOpen(false)}
         isDark={isDark}
         initialMode={authModalMode}
+        onLoginSuccess={(name) => {
+          setToastMsg(`Welcome back, ${name}! 👋`);
+          setTimeout(() => setToastMsg(null), 4000);
+        }}
       />
     </div>
   );
