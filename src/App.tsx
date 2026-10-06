@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { User } from "@supabase/supabase-js";
-import { supabase, isSupabaseConfigured } from "./lib/supabase";
+import { supabase } from "./lib/supabase";
+import { AuthModal } from "./components/AuthModal";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type HistoryKind = "brainstorm" | "script";
@@ -351,6 +352,18 @@ export default function App() {
   const [scriptLoading, setScriptLoading] = useState(false);
   const [studioError, setStudioError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
+
+  const openSignIn = () => {
+    setAuthModalMode("signin");
+    setAuthModalOpen(true);
+  };
+
+  const openSignUp = () => {
+    setAuthModalMode("signup");
+    setAuthModalOpen(true);
+  };
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -368,16 +381,6 @@ export default function App() {
       authListener.subscription.unsubscribe();
     };
   }, []);
-
-  const handleGoogleLogin = async () => {
-    if (!supabase) return;
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-  };
 
   const handleLogout = async () => {
     if (!supabase) return;
@@ -615,55 +618,52 @@ export default function App() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {isSupabaseConfigured ? (
-            user ? (
-              <div className={`flex items-center gap-3 rounded-xl border px-3 py-1.5 text-xs font-medium ${isDark ? "border-zinc-700 bg-zinc-900/80 text-zinc-200" : "border-zinc-300 bg-white text-zinc-800"}`}>
-                {user.user_metadata?.avatar_url && (
-                  <img
-                    src={user.user_metadata.avatar_url}
-                    alt="Avatar"
-                    className="h-6 w-6 rounded-full"
-                  />
-                )}
-                <span className="max-w-[120px] truncate">
-                  {user.user_metadata?.full_name || user.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="rounded bg-zinc-800 px-2 py-1 text-[10px] uppercase text-zinc-300 hover:text-white"
-                >
-                  Sign Out
-                </button>
-              </div>
-            ) : (
+          {user ? (
+            <div className={`flex items-center gap-3 rounded-xl border px-3.5 py-2 text-xs font-medium shadow-sm ${isDark ? "border-zinc-700 bg-zinc-900/80 text-zinc-200" : "border-zinc-300 bg-white text-zinc-800"}`}>
+              {user.user_metadata?.avatar_url ? (
+                <img
+                  src={user.user_metadata.avatar_url}
+                  alt="Avatar"
+                  className="h-6 w-6 rounded-full ring-1 ring-violet-500"
+                />
+              ) : (
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
+                  {(user.user_metadata?.full_name || user.email || "U").slice(0, 2).toUpperCase()}
+                </div>
+              )}
+              <span className="font-semibold text-violet-400">
+                Welcome back, {user.user_metadata?.full_name || user.email?.split("@")[0]}!
+              </span>
               <button
                 type="button"
-                onClick={handleGoogleLogin}
-                className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900/90 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800"
+                onClick={handleLogout}
+                className="ml-1 rounded-lg bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-400 transition hover:bg-rose-500/20"
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.32 7.31 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.99 0 12s.46 3.84 1.26 5.42l4.02-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.68 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-                Sign in with Google
+                Sign Out
               </button>
-            )
-          ) : null}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openSignIn}
+                className={`rounded-xl border px-3.5 py-2 text-xs font-semibold transition ${
+                  isDark
+                    ? "border-zinc-700 bg-zinc-900/90 text-zinc-100 hover:bg-zinc-800"
+                    : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={openSignUp}
+                className="rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-violet-500"
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
 
           <button
             type="button"
@@ -881,6 +881,13 @@ export default function App() {
       <footer className={`mt-12 text-center text-xs ${isDark ? "text-zinc-600" : "text-zinc-500"}`}>
         Uses OpenRouter for chat + script generation.
       </footer>
+
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        isDark={isDark}
+        initialMode={authModalMode}
+      />
     </div>
   );
 }
