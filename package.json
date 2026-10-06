@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

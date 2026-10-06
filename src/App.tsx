@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { User } from "@supabase/supabase-js";
+import { supabase, isSupabaseConfigured } from "./lib/supabase";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type HistoryKind = "brainstorm" | "script";
 type HistoryItem = {
-  id: number;
+  id: number | string;
   kind: HistoryKind;
   title: string;
   payload: unknown;
@@ -348,12 +350,41 @@ export default function App() {
   const [script, setScript] = useState("");
   const [scriptLoading, setScriptLoading] = useState(false);
   const [studioError, setStudioError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectingHistory, setSelectingHistory] = useState(false);
-  const [selectedHistoryIds, setSelectedHistoryIds] = useState<number[]>([]);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<(number | string)[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    if (!supabase) return;
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+  };
+
+  const handleLogout = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
     return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -377,17 +408,36 @@ export default function App() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const { items } = await apiGet<{ items: HistoryItem[] }>("/api/history?limit=25");
-      setHistory(items);
-      setSelectedHistoryIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
+      if (supabase && user) {
+        const { data, error } = await supabase
+          .from("history_items")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(25);
+        if (error) throw error;
+        const items: HistoryItem[] = (data || []).map((row: any) => ({
+          id: row.id,
+          kind: row.kind,
+          title: row.title,
+          payload: row.payload,
+          createdAt: new Date(row.created_at).toLocaleString(),
+        }));
+        setHistory(items);
+        setSelectedHistoryIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
+      } else {
+        const { items } = await apiGet<{ items: HistoryItem[] }>("/api/history?limit=25");
+        setHistory(items);
+        setSelectedHistoryIds((prev) => prev.filter((id) => items.some((item) => item.id === id)));
+      }
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : "Failed to load history");
     } finally {
       setHistoryLoading(false);
     }
-  }, []);
+  }, [user]);
 
-  const toggleHistorySelection = useCallback((id: number) => {
+  const toggleHistorySelection = useCallback((id: number | string) => {
     setSelectedHistoryIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
@@ -398,7 +448,15 @@ export default function App() {
     setHistoryError(null);
     setDeleteLoading(true);
     try {
-      await apiDelete("/api/history", { ids: selectedHistoryIds });
+      if (supabase && user) {
+        const { error } = await supabase
+          .from("history_items")
+          .delete()
+          .in("id", selectedHistoryIds);
+        if (error) throw error;
+      } else {
+        await apiDelete("/api/history", { ids: selectedHistoryIds });
+      }
       setSelectedHistoryIds([]);
       setSelectingHistory(false);
       await loadHistory();
@@ -407,7 +465,7 @@ export default function App() {
     } finally {
       setDeleteLoading(false);
     }
-  }, [selectedHistoryIds, deleteLoading, loadHistory]);
+  }, [selectedHistoryIds, deleteLoading, user, loadHistory]);
 
   useEffect(() => {
     loadHistory().catch(() => {});
@@ -463,16 +521,29 @@ export default function App() {
     try {
       const firstUser =
         chatMessages.find((m) => m.role === "user")?.content || "Brainstorm chat";
-      await apiJson("/api/history", {
-        kind: "brainstorm",
-        title: firstUser.slice(0, 80),
-        payload: { messages: chatMessages },
-      });
+      const title = firstUser.slice(0, 80);
+      const payload = { messages: chatMessages };
+
+      if (supabase && user) {
+        const { error } = await supabase.from("history_items").insert({
+          user_id: user.id,
+          kind: "brainstorm",
+          title,
+          payload,
+        });
+        if (error) throw error;
+      } else {
+        await apiJson("/api/history", {
+          kind: "brainstorm",
+          title,
+          payload,
+        });
+      }
       await loadHistory();
     } catch (e) {
       setChatError(e instanceof Error ? e.message : "Failed to save history");
     }
-  }, [chatMessages, loadHistory]);
+  }, [chatMessages, user, loadHistory]);
 
   const saveScript = useCallback(async () => {
     if (!script.trim()) {
@@ -481,16 +552,29 @@ export default function App() {
     }
     setStudioError(null);
     try {
-      await apiJson("/api/history", {
-        kind: "script",
-        title: topic.trim().slice(0, 80) || "Untitled script",
-        payload: { topic, tone, length, notes, script },
-      });
+      const title = topic.trim().slice(0, 80) || "Untitled script";
+      const payload = { topic, tone, length, notes, script };
+
+      if (supabase && user) {
+        const { error } = await supabase.from("history_items").insert({
+          user_id: user.id,
+          kind: "script",
+          title,
+          payload,
+        });
+        if (error) throw error;
+      } else {
+        await apiJson("/api/history", {
+          kind: "script",
+          title,
+          payload,
+        });
+      }
       await loadHistory();
     } catch (e) {
       setStudioError(e instanceof Error ? e.message : "Failed to save history");
     }
-  }, [topic, tone, length, notes, script, loadHistory]);
+  }, [topic, tone, length, notes, script, user, loadHistory]);
 
   const applyHistory = useCallback((item: HistoryItem) => {
     if (item.kind === "brainstorm") {
@@ -530,17 +614,69 @@ export default function App() {
             — API key stays on the server.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-          className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
-            isDark
-              ? "border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:bg-zinc-800"
-              : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-          }`}
-        >
-          {isDark ? "Light mode" : "Dark mode"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {isSupabaseConfigured ? (
+            user ? (
+              <div className={`flex items-center gap-3 rounded-xl border px-3 py-1.5 text-xs font-medium ${isDark ? "border-zinc-700 bg-zinc-900/80 text-zinc-200" : "border-zinc-300 bg-white text-zinc-800"}`}>
+                {user.user_metadata?.avatar_url && (
+                  <img
+                    src={user.user_metadata.avatar_url}
+                    alt="Avatar"
+                    className="h-6 w-6 rounded-full"
+                  />
+                )}
+                <span className="max-w-[120px] truncate">
+                  {user.user_metadata?.full_name || user.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded bg-zinc-800 px-2 py-1 text-[10px] uppercase text-zinc-300 hover:text-white"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900/90 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-800"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.15C3.25 21.32 7.31 24 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.26C.46 8.16 0 9.99 0 12s.46 3.84 1.26 5.42l4.02-3.15z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.68 1.26 6.58l4.02 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                  />
+                </svg>
+                Sign in with Google
+              </button>
+            )
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+            className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+              isDark
+                ? "border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:bg-zinc-800"
+                : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
+            }`}
+          >
+            {isDark ? "Light mode" : "Dark mode"}
+          </button>
+        </div>
         {health && !health.hasKey && (
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
             Add <code className="rounded bg-black/30 px-1">OPENROUTER_API_KEY</code> to{" "}
