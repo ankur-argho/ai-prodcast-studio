@@ -25,12 +25,14 @@ export function AuthModal({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [suggestMode, setSuggestMode] = useState<"signin" | "signup" | null>(null);
 
   if (!isOpen) return null;
 
   const resetForm = () => {
     setErrorMsg(null);
     setSuccessMsg(null);
+    setSuggestMode(null);
   };
 
   const handleSwitchMode = (newMode: "signin" | "signup") => {
@@ -67,7 +69,7 @@ export function AuthModal({
         return data;
       }
     } catch {
-      // Ignore RPC failure if SQL function not created yet
+      // Ignore RPC error
     }
     return null;
   };
@@ -104,6 +106,7 @@ export function AuthModal({
       if (exists === true) {
         setLoading(false);
         setErrorMsg("An account with this email already exists. Please sign in.");
+        setSuggestMode("signin");
         setMode("signin");
         return;
       }
@@ -126,6 +129,7 @@ export function AuthModal({
             error.status === 400
           ) {
             setErrorMsg("An account with this email already exists. Please sign in.");
+            setSuggestMode("signin");
             setMode("signin");
           } else {
             setErrorMsg(error.message);
@@ -135,6 +139,7 @@ export function AuthModal({
 
         if (data.user && data.user.identities && data.user.identities.length === 0) {
           setErrorMsg("An account with this email already exists. Please sign in.");
+          setSuggestMode("signin");
           setMode("signin");
           return;
         }
@@ -156,7 +161,8 @@ export function AuthModal({
       const isRegistered = await checkEmailExists(cleanEmail);
       if (isRegistered === false) {
         setLoading(false);
-        setErrorMsg("No account found with this email. Please sign up first.");
+        setErrorMsg("Account not found. Please create an account first.");
+        setSuggestMode("signup");
         setMode("signup");
         return;
       }
@@ -216,12 +222,12 @@ export function AuthModal({
         {/* Modal Header */}
         <div className="mb-6 text-center">
           <h2 className="font-display text-2xl font-bold">
-            {mode === "signin" ? "Sign In" : "Sign Up"}
+            {mode === "signin" ? "Sign In" : "Create Account"}
           </h2>
           <p className={`mt-1 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
             {mode === "signin"
               ? "Sign in with your existing account."
-              : "Create a new account to get started."}
+              : "Register a new account to start brainstorming."}
           </p>
         </div>
 
@@ -265,13 +271,31 @@ export function AuthModal({
 
         {/* Alert Messages */}
         {successMsg && (
-          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs font-medium text-emerald-400">
             {successMsg}
           </div>
         )}
         {errorMsg && (
-          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-400">
-            {errorMsg}
+          <div className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-xs text-rose-300">
+            <div>{errorMsg}</div>
+            {suggestMode === "signup" && (
+              <button
+                type="button"
+                onClick={() => handleSwitchMode("signup")}
+                className="mt-2 inline-block rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500"
+              >
+                Create Account
+              </button>
+            )}
+            {suggestMode === "signin" && (
+              <button
+                type="button"
+                onClick={() => handleSwitchMode("signin")}
+                className="mt-2 inline-block rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         )}
 

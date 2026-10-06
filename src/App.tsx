@@ -395,11 +395,6 @@ export default function App() {
     setAuthModalOpen(true);
   };
 
-  const openSignUp = () => {
-    setAuthModalMode("signup");
-    setAuthModalOpen(true);
-  };
-
   const checkUserUsage = useCallback(async (token?: string) => {
     if (!token) {
       setChatsUsed(0);
@@ -728,41 +723,32 @@ export default function App() {
                 />
               ) : (
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
-                  {(user.user_metadata?.full_name || user.email || "U").slice(0, 2).toUpperCase()}
+                  {(user.user_metadata?.full_name || user.email || "A").slice(0, 2).toUpperCase()}
                 </div>
               )}
               <span className="font-semibold text-violet-400">
-                Welcome back, {user.user_metadata?.full_name || user.email?.split("@")[0]}! 👋
+                Welcome, {user.user_metadata?.full_name || user.email?.split("@")[0]} 👋
               </span>
               <button
                 type="button"
                 onClick={handleLogout}
                 className="ml-1 rounded-lg bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-400 transition hover:bg-rose-500/20"
               >
-                Log Out
+                Logout
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={openSignIn}
-                className={`rounded-xl border px-3.5 py-2 text-xs font-semibold transition ${
-                  isDark
-                    ? "border-zinc-700 bg-zinc-900/90 text-zinc-100 hover:bg-zinc-800"
-                    : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100"
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={openSignUp}
-                className="rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-violet-500"
-              >
-                Sign Up
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={openSignIn}
+              className={`rounded-xl border px-4 py-2 text-xs font-semibold shadow-sm transition ${
+                isDark
+                  ? "border-violet-500/40 bg-violet-600/20 text-violet-200 hover:bg-violet-600/30"
+                  : "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
+              }`}
+            >
+              Sign In / Sign Up
+            </button>
           )}
 
           <button
@@ -983,8 +969,8 @@ export default function App() {
         </section>
       </main>
 
-      <footer className={`mt-12 text-center text-xs ${isDark ? "text-zinc-600" : "text-zinc-500"}`}>
-        Uses OpenRouter for chat + script generation.
+      <footer className={`mt-16 border-t py-6 text-center text-xs transition ${isDark ? "border-zinc-800/80 text-zinc-500" : "border-zinc-200 text-zinc-600"}`}>
+        © 2026 Argho Ghosh. All Rights Reserved.
       </footer>
 
       <AuthModal
