@@ -45,10 +45,11 @@ export function AuthModal({
     setLoading(true);
     setErrorMsg(null);
     try {
+      const cleanOrigin = window.location.origin.replace(/\/$/, "");
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: `${cleanOrigin}/`,
         },
       });
       if (error) throw error;
