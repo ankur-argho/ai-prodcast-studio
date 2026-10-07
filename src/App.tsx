@@ -20,10 +20,23 @@ function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
-async function apiJson<T>(path: string, body: unknown, token?: string): Promise<T> {
+function getGuestToken(): string {
+  if (typeof window === "undefined") return "guest_default";
+  let guestToken = localStorage.getItem("ai_podcast_guest_token");
+  if (!guestToken) {
+    guestToken = "guest_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now().toString(36);
+    localStorage.setItem("ai_podcast_guest_token", guestToken);
+  }
+  return guestToken;
+}
+
+async function apiJson<T>(path: string, body: unknown, token?: string, guestToken?: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+  if (guestToken) {
+    headers["x-guest-token"] = guestToken;
   }
   const res = await fetch(apiUrl(path), {
     method: "POST",
@@ -32,7 +45,11 @@ async function apiJson<T>(path: string, body: unknown, token?: string): Promise<
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || res.statusText);
+    const errorMsg = (data as { error?: string }).error || res.statusText;
+    const err = new Error(errorMsg);
+    (err as any).status = res.status;
+    (err as any).limitReached = Boolean((data as any).limitReached);
+    throw err;
   }
   return data as T;
 }
@@ -68,8 +85,7 @@ function BrainstormPanel({
   error,
   isDark,
   chatLimitReached,
-  user,
-  onOpenSignIn,
+  onOpenAuthModal,
 }: {
   messages: ChatMessage[];
   draft: string;
@@ -79,8 +95,7 @@ function BrainstormPanel({
   error: string | null;
   isDark: boolean;
   chatLimitReached: boolean;
-  user: User | null;
-  onOpenSignIn: () => void;
+  onOpenAuthModal: (mode: "signin" | "signup") => void;
 }) {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -102,16 +117,17 @@ function BrainstormPanel({
             Chat through angles, titles, segments, and hooks before you write.
           </p>
         </div>
-        {user && (
-          <span className={`text-xs px-2.5 py-1 rounded-full border ${
+        <span
+          className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${
             chatLimitReached
-              ? "border-amber-500/40 bg-amber-500/10 text-amber-400 font-semibold"
+              ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
               : "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-          }`}>
-            {chatLimitReached ? "1/1 Free Chat Used" : "1 Free Chat Remaining"}
-          </span>
-        )}
+          }`}
+        >
+          {chatLimitReached ? "1/1 Free Chat Used" : "1 Free Chat Available"}
+        </span>
       </header>
+
       <div
         className={`flex-1 space-y-3 overflow-y-auto rounded-xl p-4 ring-1 ${
           isDark ? "bg-zinc-950/50 ring-zinc-800/60" : "bg-white/90 ring-zinc-200"
@@ -119,8 +135,7 @@ function BrainstormPanel({
       >
         {messages.length === 0 && (
           <p className={`text-sm ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-            Try: “Podcast about urban composting for renters — need a punchy cold
-            open.”
+            Try: “Podcast about urban composting for renters — need a punchy cold open.”
           </p>
         )}
         {messages.map((m, i) => (
@@ -132,8 +147,8 @@ function BrainstormPanel({
                   ? "ml-8 bg-violet-600/20 text-violet-100 ring-1 ring-violet-500/30"
                   : "ml-8 bg-violet-100 text-violet-800 ring-1 ring-violet-200"
                 : isDark
-                  ? "mr-8 bg-zinc-800/60 text-zinc-200"
-                  : "mr-8 bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200"
+                ? "mr-8 bg-zinc-800/60 text-zinc-200"
+                : "mr-8 bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200"
             }`}
           >
             <span className="whitespace-pre-wrap">{m.content}</span>
@@ -151,21 +166,31 @@ function BrainstormPanel({
         <div ref={bottom} />
       </div>
 
-      {!user ? (
-        <div className="mt-4 rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-center text-xs text-violet-300">
-          Please{" "}
-          <button type="button" onClick={onOpenSignIn} className="font-bold underline hover:text-white">
-            Sign In
-          </button>{" "}
-          or create an account to start brainstorming.
+      {chatLimitReached && (
+        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-center text-xs text-amber-300">
+          <div className="font-semibold">
+            You've used your free chat. Please sign in or create an account to continue.
+          </div>
+          <div className="mt-2.5 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenAuthModal("signin")}
+              className="rounded-lg bg-violet-600 px-3.5 py-1.5 font-semibold text-white transition hover:bg-violet-500 shadow-md"
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenAuthModal("signup")}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3.5 py-1.5 font-semibold text-zinc-200 transition hover:bg-zinc-700"
+            >
+              Create Account
+            </button>
+          </div>
         </div>
-      ) : chatLimitReached ? (
-        <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-center text-xs font-medium text-amber-300">
-          You've used your free chat. Upgrade to continue.
-        </div>
-      ) : null}
+      )}
 
-      {error && (
+      {error && !chatLimitReached && (
         <p className="mt-2 text-sm text-red-400" role="alert">
           {error}
         </p>
@@ -174,7 +199,7 @@ function BrainstormPanel({
       <div className="mt-4 flex gap-2">
         <textarea
           value={draft}
-          disabled={chatLimitReached || !user}
+          disabled={chatLimitReached}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -183,10 +208,8 @@ function BrainstormPanel({
             }
           }}
           placeholder={
-            !user
-              ? "Please sign in to start chatting…"
-              : chatLimitReached
-              ? "Free chat limit reached. Upgrade to continue."
+            chatLimitReached
+              ? "You've used your free chat. Please sign in or create an account to continue."
               : "Describe your show idea or paste rough notes…"
           }
           rows={3}
@@ -199,7 +222,7 @@ function BrainstormPanel({
         <button
           type="button"
           onClick={onSend}
-          disabled={loading || !draft.trim() || chatLimitReached || !user}
+          disabled={loading || !draft.trim() || chatLimitReached}
           className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-violet-900/40 transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Send
@@ -359,9 +382,7 @@ function StudioPanel({
 
 export default function App() {
   const [tab, setTab] = useState<"brainstorm" | "studio">("brainstorm");
-  const [health, setHealth] = useState<{ ok: boolean; hasKey: boolean } | null>(
-    null,
-  );
+  const [health, setHealth] = useState<{ ok: boolean; hasKey: boolean } | null>(null);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -390,28 +411,30 @@ export default function App() {
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<(number | string)[]>([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const openSignIn = () => {
-    setAuthModalMode("signin");
+  const isPermanentUser = Boolean(user && !user.is_anonymous);
+
+  const openAuthModal = (mode: "signin" | "signup" = "signin") => {
+    setAuthModalMode(mode);
     setAuthModalOpen(true);
   };
 
-  const checkUserUsage = useCallback(async (token?: string) => {
-    if (!token) {
-      setChatsUsed(0);
-      setChatLimitReached(false);
-      return;
+  const checkUserUsage = useCallback(async (token?: string, guestTokenOverride?: string) => {
+    const gToken = guestTokenOverride || getGuestToken();
+    const headers: Record<string, string> = {
+      "x-guest-token": gToken,
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
     try {
-      const res = await fetch(apiUrl("/api/user/usage"), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(apiUrl("/api/user/usage"), { headers });
       const data = await res.json().catch(() => ({}));
       if (data.chatsUsed !== undefined) {
         setChatsUsed(data.chatsUsed);
         setChatLimitReached(Boolean(data.limitReached || data.chatsUsed >= 1));
       }
     } catch {
-      // Ignore
+      // Ignore network usage check errors
     }
   }, []);
 
@@ -430,32 +453,49 @@ export default function App() {
       } else {
         setToastMsg(`Auth Error: ${decoded}`);
       }
-      // Clean up URL search & hash parameters
       window.history.replaceState({}, document.title, window.location.pathname);
       setTimeout(() => setToastMsg(null), 8000);
     }
 
     if (!supabase) return;
 
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      if (data.session?.access_token) {
-        checkUserUsage(data.session.access_token);
+    supabase.auth.getSession().then(async ({ data }) => {
+      let currentSession = data.session;
+      if (!currentSession && supabase) {
+        // Attempt anonymous sign in for visitors
+        const { data: anonData } = await supabase.auth.signInAnonymously().catch(() => ({ data: null }));
+        if (anonData?.session) {
+          currentSession = anonData.session;
+        }
       }
+      const u = currentSession?.user ?? null;
+      setUser(u);
+      const token = currentSession?.access_token;
+      checkUserUsage(token, getGuestToken());
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.access_token) {
-        checkUserUsage(session.access_token);
-      } else {
-        setChatsUsed(0);
-        setChatLimitReached(false);
-      }
+      const u = session?.user ?? null;
+      setUser(u);
+      const token = session?.access_token;
+      checkUserUsage(token, getGuestToken());
 
-      if (event === "SIGNED_IN") {
+      if (event === "SIGNED_IN" && session?.user && !session.user.is_anonymous) {
         setToastMsg("Welcome back! 👋");
         setTimeout(() => setToastMsg(null), 4000);
+
+        // Link guest usage to permanent user
+        const guestToken = getGuestToken();
+        if (token && guestToken) {
+          fetch(apiUrl("/api/user/link-guest"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ guestToken }),
+          }).catch(() => {});
+        }
       }
     });
 
@@ -470,13 +510,13 @@ export default function App() {
     setUser(null);
     setToastMsg("You have been signed out successfully.");
     setTimeout(() => setToastMsg(null), 3000);
+    // Maintain guest usage check so logging out does NOT give another free chat
+    checkUserUsage(undefined, getGuestToken());
   };
 
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
   const isDark = theme === "dark";
 
@@ -495,7 +535,7 @@ export default function App() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      if (supabase && user) {
+      if (supabase && user && !user.is_anonymous) {
         const { data, error } = await supabase
           .from("history_items")
           .select("*")
@@ -525,9 +565,7 @@ export default function App() {
   }, [user]);
 
   const toggleHistorySelection = useCallback((id: number | string) => {
-    setSelectedHistoryIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+    setSelectedHistoryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }, []);
 
   const deleteSelectedHistory = useCallback(async () => {
@@ -535,11 +573,8 @@ export default function App() {
     setHistoryError(null);
     setDeleteLoading(true);
     try {
-      if (supabase && user) {
-        const { error } = await supabase
-          .from("history_items")
-          .delete()
-          .in("id", selectedHistoryIds);
+      if (supabase && user && !user.is_anonymous) {
+        const { error } = await supabase.from("history_items").delete().in("id", selectedHistoryIds);
         if (error) throw error;
       } else {
         await apiDelete("/api/history", { ids: selectedHistoryIds });
@@ -562,14 +597,8 @@ export default function App() {
     const text = chatDraft.trim();
     if (!text || chatLoading) return;
 
-    if (!user) {
-      setChatError("Please sign in or create an account to use AI chat.");
-      openSignIn();
-      return;
-    }
-
     if (chatLimitReached || chatsUsed >= 1) {
-      setChatError("You've used your free chat. Please upgrade to continue.");
+      setChatError("You've used your free chat. Please sign in or create an account to continue.");
       return;
     }
 
@@ -582,26 +611,26 @@ export default function App() {
     try {
       const session = supabase ? (await supabase.auth.getSession()).data.session : null;
       const token = session?.access_token;
+      const guestToken = getGuestToken();
       const msgs = next.map((m) => ({ role: m.role, content: m.content }));
-      const { message } = await apiJson<{ message: string }>(
-        "/api/chat",
-        { messages: msgs },
-        token
-      );
+
+      const { message } = await apiJson<{ message: string }>("/api/chat", { messages: msgs }, token, guestToken);
+
       setChatMessages([...next, { role: "assistant", content: message }]);
       setChatsUsed((prev) => prev + 1);
       setChatLimitReached(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Request failed";
-      if (msg.includes("used your free chat")) {
+      if (msg.includes("used your free chat") || (e as any).limitReached) {
         setChatLimitReached(true);
+        setChatsUsed(1);
       }
       setChatError(msg);
       setChatMessages(next);
     } finally {
       setChatLoading(false);
     }
-  }, [chatDraft, chatLoading, chatMessages, user, chatLimitReached, chatsUsed]);
+  }, [chatDraft, chatLoading, chatMessages, chatLimitReached, chatsUsed]);
 
   const generateScript = useCallback(async () => {
     if (!topic.trim()) return;
@@ -629,12 +658,11 @@ export default function App() {
     }
     setChatError(null);
     try {
-      const firstUser =
-        chatMessages.find((m) => m.role === "user")?.content || "Brainstorm chat";
+      const firstUser = chatMessages.find((m) => m.role === "user")?.content || "Brainstorm chat";
       const title = firstUser.slice(0, 80);
       const payload = { messages: chatMessages };
 
-      if (supabase && user) {
+      if (supabase && user && !user.is_anonymous) {
         const { error } = await supabase.from("history_items").insert({
           user_id: user.id,
           kind: "brainstorm",
@@ -665,7 +693,7 @@ export default function App() {
       const title = topic.trim().slice(0, 80) || "Untitled script";
       const payload = { topic, tone, length, notes, script };
 
-      if (supabase && user) {
+      if (supabase && user && !user.is_anonymous) {
         const { error } = await supabase.from("history_items").insert({
           user_id: user.id,
           kind: "script",
@@ -727,14 +755,17 @@ export default function App() {
             AI Podcast Studio
           </h1>
           <p className={`mt-2 max-w-xl ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-            Brainstorm with a producer-style chatbot, then generate full scripts
-            — API key stays on the server.
+            Brainstorm with a producer-style chatbot, then generate full scripts — API key stays on the server.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {user ? (
-            <div className={`flex items-center gap-3 rounded-xl border px-3.5 py-2 text-xs font-medium shadow-sm ${isDark ? "border-zinc-700 bg-zinc-900/80 text-zinc-200" : "border-zinc-300 bg-white text-zinc-800"}`}>
-              {user.user_metadata?.avatar_url ? (
+          {isPermanentUser ? (
+            <div
+              className={`flex items-center gap-3 rounded-xl border px-3.5 py-2 text-xs font-medium shadow-sm ${
+                isDark ? "border-zinc-700 bg-zinc-900/80 text-zinc-200" : "border-zinc-300 bg-white text-zinc-800"
+              }`}
+            >
+              {user?.user_metadata?.avatar_url ? (
                 <img
                   src={user.user_metadata.avatar_url}
                   alt="Avatar"
@@ -742,11 +773,11 @@ export default function App() {
                 />
               ) : (
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-600 text-[10px] font-bold text-white">
-                  {(user.user_metadata?.full_name || user.email || "A").slice(0, 2).toUpperCase()}
+                  {(user?.user_metadata?.full_name || user?.email || "U").slice(0, 2).toUpperCase()}
                 </div>
               )}
               <span className="font-semibold text-violet-400">
-                Welcome, {user.user_metadata?.full_name || user.email?.split("@")[0]} 👋
+                Welcome, {user?.user_metadata?.full_name || user?.email?.split("@")[0]} 👋
               </span>
               <button
                 type="button"
@@ -759,7 +790,7 @@ export default function App() {
           ) : (
             <button
               type="button"
-              onClick={openSignIn}
+              onClick={() => openAuthModal("signin")}
               className={`rounded-xl border px-4 py-2 text-xs font-semibold shadow-sm transition ${
                 isDark
                   ? "border-violet-500/40 bg-violet-600/20 text-violet-200 hover:bg-violet-600/30"
@@ -812,8 +843,8 @@ export default function App() {
                   ? "bg-zinc-800 text-white shadow ring-1 ring-zinc-700"
                   : "bg-white text-zinc-900 shadow ring-1 ring-zinc-200"
                 : isDark
-                  ? "text-zinc-500 hover:text-zinc-300"
-                  : "text-zinc-500 hover:text-zinc-700"
+                ? "text-zinc-500 hover:text-zinc-300"
+                : "text-zinc-500 hover:text-zinc-700"
             }`}
           >
             {label}
@@ -832,8 +863,7 @@ export default function App() {
             error={chatError}
             isDark={isDark}
             chatLimitReached={chatLimitReached}
-            user={user}
-            onOpenSignIn={openSignIn}
+            onOpenAuthModal={openAuthModal}
           />
         ) : (
           <StudioPanel
@@ -853,155 +883,141 @@ export default function App() {
             isDark={isDark}
           />
         )}
+      </main>
 
-        <section
-          className={`mt-10 rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
-            isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div>
-              <h2 className={`font-display text-xl ${isDark ? "text-zinc-50" : "text-zinc-900"}`}>
-                Saved history
-              </h2>
-              <p className={`mt-0.5 text-xs ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
-                No saved entries yet. Save a brainstorm or script to keep it.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectingHistory((prev) => !prev)}
-                className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
-                  selectingHistory
-                    ? "border-red-500/50 bg-red-500/10 text-red-400"
-                    : isDark
-                    ? "border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800"
-                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-                }`}
-              >
-                {selectingHistory ? "Cancel selection" : "Select to delete"}
-              </button>
-              {tab === "brainstorm" ? (
-                <button
-                  type="button"
-                  onClick={saveBrainstorm}
-                  className="rounded-xl bg-violet-600 px-4 py-1.5 text-xs font-medium text-white shadow transition hover:bg-violet-500"
-                >
-                  Save brainstorm
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={saveScript}
-                  className="rounded-xl bg-violet-600 px-4 py-1.5 text-xs font-medium text-white shadow transition hover:bg-violet-500"
-                >
-                  Save script
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => loadHistory()}
-                className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
-                  isDark
-                    ? "border-zinc-700 bg-zinc-800/60 text-zinc-200 hover:bg-zinc-800"
-                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100"
-                }`}
-              >
-                Refresh
-              </button>
-            </div>
+      <section
+        className={`mt-8 rounded-2xl border p-5 shadow-xl backdrop-blur-sm ${
+          isDark ? "border-zinc-800/80 bg-zinc-900/40" : "border-zinc-200 bg-white/70"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className={`font-display text-lg ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
+              Saved history
+            </h3>
+            <p className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+              No saved entries yet. Save a brainstorm or script to keep it.
+            </p>
           </div>
-
-          {selectingHistory && selectedHistoryIds.length > 0 && (
-            <div className="mb-4 flex items-center justify-between rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
-              <span>{selectedHistoryIds.length} item(s) selected</span>
+          <div className="flex items-center gap-2">
+            {tab === "brainstorm" ? (
               <button
                 type="button"
-                onClick={deleteSelectedHistory}
-                disabled={deleteLoading}
-                className="rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
+                onClick={saveBrainstorm}
+                className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white shadow transition hover:bg-violet-500"
               >
-                {deleteLoading ? "Deleting…" : "Delete selected"}
+                Save brainstorm
               </button>
-            </div>
-          )}
-
-          {historyError && (
-            <p className="mb-3 text-xs text-red-400" role="alert">
-              {historyError}
-            </p>
-          )}
-
-          {historyLoading && history.length === 0 && (
-            <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-              Loading history…
-            </p>
-          )}
-
-          <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
-            {history.map((item) => (
-              <div
-                key={item.id}
-                className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
-                  isDark
-                    ? "border-zinc-800 bg-zinc-950/50 hover:border-zinc-700 hover:bg-zinc-900/70"
-                    : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
-                }`}
+            ) : (
+              <button
+                type="button"
+                onClick={saveScript}
+                className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white shadow transition hover:bg-violet-500"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
+                Save script
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => loadHistory()}
+              disabled={historyLoading}
+              className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                isDark ? "border-zinc-700 text-zinc-300 hover:bg-zinc-800" : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+              }`}
+            >
+              {historyLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        {historyError && (
+          <p className="mt-2 text-xs text-rose-400" role="alert">
+            {historyError}
+          </p>
+        )}
+
+        {history.length > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span>{history.length} saved item(s)</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectingHistory(!selectingHistory);
+                    setSelectedHistoryIds([]);
+                  }}
+                  className="font-medium text-violet-400 hover:underline"
+                >
+                  {selectingHistory ? "Cancel selection" : "Select to delete"}
+                </button>
+                {selectingHistory && selectedHistoryIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deleteSelectedHistory}
+                    disabled={deleteLoading}
+                    className="font-medium text-rose-400 hover:underline"
+                  >
+                    Delete ({selectedHistoryIds.length})
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              {history.map((item) => (
+                <div
+                  key={item.id}
+                  className={`flex items-center justify-between rounded-xl border p-3 text-xs transition ${
+                    isDark ? "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900/60" : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
                     {selectingHistory && (
                       <input
                         type="checkbox"
                         checked={selectedHistoryIds.includes(item.id)}
                         onChange={() => toggleHistorySelection(item.id)}
-                        className="h-4 w-4 accent-red-500"
+                        className="h-4 w-4 rounded border-zinc-700 text-violet-600 focus:ring-violet-500"
                       />
                     )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectingHistory ? toggleHistorySelection(item.id) : applyHistory(item)
-                      }
-                      className={`truncate text-left ${
-                        isDark ? "text-zinc-100" : "text-zinc-900"
-                      }`}
-                    >
-                      {item.title}
-                    </button>
+                    <div>
+                      <span className="font-semibold text-violet-400 uppercase text-[10px] tracking-wider mr-2">
+                        [{item.kind}]
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => applyHistory(item)}
+                        className="font-medium hover:underline text-left"
+                      >
+                        {item.title}
+                      </button>
+                      <div className="text-[10px] text-zinc-500">{item.createdAt}</div>
+                    </div>
                   </div>
-                  <span
-                    className={`shrink-0 text-xs uppercase tracking-wide ${
-                      isDark ? "text-zinc-500" : "text-zinc-500"
-                    }`}
+                  <button
+                    type="button"
+                    onClick={() => applyHistory(item)}
+                    className="rounded-lg bg-violet-600/10 px-2.5 py-1 text-xs font-semibold text-violet-400 hover:bg-violet-600/20"
                   >
-                    {item.kind}
-                  </span>
+                    Load
+                  </button>
                 </div>
-                <p className={`mt-1 text-xs ${isDark ? "text-zinc-500" : "text-zinc-500"}`}>
-                  {item.createdAt}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </section>
-      </main>
-
-      <footer className={`mt-16 border-t py-6 text-center text-xs transition ${isDark ? "border-zinc-800/80 text-zinc-500" : "border-zinc-200 text-zinc-600"}`}>
-        © 2026 Argho Ghosh. All Rights Reserved.
-      </footer>
+        )}
+      </section>
 
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
         isDark={isDark}
         initialMode={authModalMode}
-        onLoginSuccess={(name) => {
-          setToastMsg(`Welcome back, ${name}! 👋`);
-          setTimeout(() => setToastMsg(null), 4000);
-        }}
       />
+
+      <footer className="mt-12 text-center text-xs text-zinc-500">
+        © 2026 Argho Ghosh. All Rights Reserved.
+      </footer>
     </div>
   );
 }

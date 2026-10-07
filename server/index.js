@@ -98,27 +98,75 @@ Rules:
 app.get("/api/user/usage", async (req, res) => {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const guestToken = (req.headers["x-guest-token"] || req.headers["x-anonymous-id"] || "").trim();
+
   const supabase = getSupabaseServer();
-  if (!supabase || !token) {
+  let user = null;
+  if (supabase && token) {
+    try {
+      const { data } = await supabase.auth.getUser(token);
+      user = data?.user || null;
+    } catch {
+      // Ignore token error
+    }
+  }
+
+  const targetId = user?.id || guestToken;
+  if (!supabase || !targetId) {
     res.json({ chatsUsed: 0, limitReached: false });
     return;
   }
+
   try {
-    const { data } = await supabase.auth.getUser(token);
-    const user = data?.user;
-    if (!user) {
-      res.json({ chatsUsed: 0, limitReached: false });
-      return;
-    }
     const { data: usage } = await supabase
       .from("user_usages")
       .select("chats_used")
-      .eq("user_id", user.id)
+      .eq("user_id", targetId)
       .single();
     const chatsUsed = usage?.chats_used || 0;
     res.json({ chatsUsed, limitReached: chatsUsed >= 1 });
   } catch (err) {
     res.json({ chatsUsed: 0, limitReached: false });
+  }
+});
+
+app.post("/api/user/link-guest", async (req, res) => {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const guestToken = (req.body?.guestToken || req.headers["x-guest-token"] || "").trim();
+
+  const supabase = getSupabaseServer();
+  if (!supabase || !token || !guestToken) {
+    res.json({ ok: true });
+    return;
+  }
+
+  try {
+    const { data } = await supabase.auth.getUser(token);
+    const user = data?.user;
+    if (!user) {
+      res.json({ ok: false, error: "Invalid user token" });
+      return;
+    }
+
+    // Check if guest used their chat
+    const { data: guestUsage } = await supabase
+      .from("user_usages")
+      .select("chats_used")
+      .eq("user_id", guestToken)
+      .single();
+
+    if (guestUsage && guestUsage.chats_used >= 1) {
+      await supabase.from("user_usages").upsert({
+        user_id: user.id,
+        chats_used: Math.max(guestUsage.chats_used, 1),
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err?.message });
   }
 });
 
@@ -128,6 +176,7 @@ app.post("/api/chat", async (req, res) => {
 
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const guestToken = (req.headers["x-guest-token"] || req.headers["x-anonymous-id"] || "").trim();
 
   const supabase = getSupabaseServer();
   let user = null;
@@ -137,30 +186,24 @@ app.post("/api/chat", async (req, res) => {
       const { data } = await supabase.auth.getUser(token);
       user = data?.user || null;
     } catch (err) {
-      console.error("Auth token verification error:", err);
+      console.error("Auth token verification notice:", err?.message);
     }
   }
 
-  if (supabase && !user) {
-    res.status(401).json({
-      error: "Authentication required. Please sign in or create an account.",
-      requireAuth: true,
-    });
-    return;
-  }
+  const targetId = user?.id || guestToken;
 
   // Enforce 1 FREE CHAT LIMIT
-  if (supabase && user) {
+  if (supabase && targetId) {
     try {
       const { data: usage } = await supabase
         .from("user_usages")
         .select("chats_used")
-        .eq("user_id", user.id)
+        .eq("user_id", targetId)
         .single();
 
       if (usage && usage.chats_used >= 1) {
         res.status(403).json({
-          error: "You've used your free chat. Please upgrade to continue.",
+          error: "You've used your free chat. Please sign in or create an account to continue.",
           limitReached: true,
         });
         return;
@@ -187,17 +230,17 @@ app.post("/api/chat", async (req, res) => {
     const text = completion.choices[0]?.message?.content ?? "";
 
     // Increment chat count after completion success
-    if (supabase && user) {
+    if (supabase && targetId) {
       try {
         const { data: usage } = await supabase
           .from("user_usages")
           .select("chats_used")
-          .eq("user_id", user.id)
+          .eq("user_id", targetId)
           .single();
         const currentCount = usage?.chats_used || 0;
         await supabase.from("user_usages").upsert({
-          user_id: user.id,
-          chats_used: currentCount + 1,
+          user_id: targetId,
+          chats_used: Math.max(currentCount + 1, 1),
           updated_at: new Date().toISOString(),
         });
       } catch (err) {
