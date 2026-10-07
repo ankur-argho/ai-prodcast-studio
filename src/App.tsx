@@ -448,13 +448,9 @@ export default function App() {
 
     if (errorDesc || errorMsg) {
       const decoded = decodeURIComponent(errorDesc || errorMsg || "Authentication failed");
-      if (decoded.toLowerCase().includes("unable to exchange external code")) {
-        setToastMsg("Google Sign In Error: Please ensure Google OAuth Client ID & Secret are enabled in your Supabase Dashboard.");
-      } else {
-        setToastMsg(`Auth Error: ${decoded}`);
-      }
+      setToastMsg(`Google Auth Notice: ${decoded}`);
       window.history.replaceState({}, document.title, window.location.pathname);
-      setTimeout(() => setToastMsg(null), 8000);
+      setTimeout(() => setToastMsg(null), 10000);
     }
 
     if (!supabase) return;
